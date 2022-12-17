@@ -40,7 +40,7 @@ func TestDnsmasqExporter(t *testing.T) {
 		"--no-daemon",
 		"--cache-size=666",
 		"--bind-interfaces",
-		"--interface=lo")
+		"--interface=lo0")
 	dnsmasq.Stderr = os.Stderr
 	fmt.Printf("starting %v\n", dnsmasq.Args)
 	if err := dnsmasq.Start(); err != nil {
@@ -89,7 +89,7 @@ func TestDnsmasqExporter(t *testing.T) {
 		want := map[string]string{
 			"dnsmasq_leases":    "2",
 			"dnsmasq_cachesize": "666",
-			"dnsmasq_hits":      "2",
+			"dnsmasq_hits":      "8",
 			"dnsmasq_misses":    "0",
 		}
 		for key, val := range want {
@@ -111,7 +111,7 @@ func TestDnsmasqExporter(t *testing.T) {
 		want := map[string]string{
 			"dnsmasq_leases":    "2",
 			"dnsmasq_cachesize": "666",
-			"dnsmasq_hits":      "3",
+			"dnsmasq_hits":      "15",
 			"dnsmasq_misses":    "1",
 		}
 		for key, val := range want {
@@ -128,7 +128,7 @@ func TestDnsmasqExporter(t *testing.T) {
 		want := map[string]string{
 			"dnsmasq_leases":    "0",
 			"dnsmasq_cachesize": "666",
-			"dnsmasq_hits":      "4",
+			"dnsmasq_hits":      "22",
 			"dnsmasq_misses":    "1",
 		}
 		for key, val := range want {

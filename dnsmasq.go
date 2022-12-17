@@ -24,6 +24,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -145,7 +146,6 @@ func question(name string) dns.Question {
 func (s *server) metrics(w http.ResponseWriter, r *http.Request) {
 	var eg errgroup.Group
 	var dnsMessages []*dns.Msg
-	//hits.bind.
 	questions := []string{"hits.bind.", "insertions.bind.", "evictions.bind.", "misses.bind.", "auth.bind.", "servers.bind.", "cachesize.bind."}
 
 	for _, q := range questions {
@@ -160,7 +160,11 @@ func (s *server) metrics(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	for _, msg := range dnsMessages {
+	for ndx, msg := range dnsMessages {
+		//TODO: refactor to allow testing without this hack.
+		if ndx != 0 {
+			time.Sleep(5 * time.Millisecond)
+		}
 		func(msg *dns.Msg) {
 			eg.Go(
 				func() error {

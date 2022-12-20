@@ -24,6 +24,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -144,67 +145,76 @@ func question(name string) dns.Question {
 
 func (s *server) metrics(w http.ResponseWriter, r *http.Request) {
 	var eg errgroup.Group
+	var dnsMessages []*dns.Msg
+	questions := []string{"hits.bind.", "insertions.bind.", "evictions.bind.", "misses.bind.", "auth.bind.", "servers.bind.", "cachesize.bind."}
 
-	eg.Go(func() error {
-		msg := &dns.Msg{
+	for _, q := range questions {
+		dnsMessages = append(dnsMessages, &dns.Msg{
 			MsgHdr: dns.MsgHdr{
 				Id:               dns.Id(),
 				RecursionDesired: true,
 			},
 			Question: []dns.Question{
-				question("cachesize.bind."),
-				question("insertions.bind."),
-				question("evictions.bind."),
-				question("misses.bind."),
-				question("hits.bind."),
-				question("auth.bind."),
-				question("servers.bind."),
+				question(q),
 			},
+		})
+	}
+
+	for ndx, msg := range dnsMessages {
+		//TODO: refactor to allow testing without this hack.
+		if ndx != 0 {
+			time.Sleep(5 * time.Millisecond)
 		}
-		in, _, err := s.dnsClient.Exchange(msg, s.dnsmasqAddr)
-		if err != nil {
-			return err
-		}
-		for _, a := range in.Answer {
-			txt, ok := a.(*dns.TXT)
-			if !ok {
-				continue
-			}
-			switch txt.Hdr.Name {
-			case "servers.bind.":
-				for _, str := range txt.Txt {
-					arr := strings.Fields(str)
-					if got, want := len(arr), 3; got != want {
-						return fmt.Errorf("stats DNS record servers.bind.: unexpeced number of argument in record: got %d, want %d", got, want)
-					}
-					queries, err := strconv.ParseFloat(arr[1], 64)
+		func(msg *dns.Msg) {
+			eg.Go(
+				func() error {
+					in, _, err := s.dnsClient.Exchange(msg, s.dnsmasqAddr)
 					if err != nil {
 						return err
 					}
-					failedQueries, err := strconv.ParseFloat(arr[2], 64)
-					if err != nil {
-						return err
+					for _, a := range in.Answer {
+						txt, ok := a.(*dns.TXT)
+						if !ok {
+							continue
+						}
+						switch txt.Hdr.Name {
+						case "servers.bind.":
+							for _, str := range txt.Txt {
+								arr := strings.Fields(str)
+								if got, want := len(arr), 3; got != want {
+									return fmt.Errorf("stats DNS record servers.bind.: unexpeced number of argument in record: got %d, want %d", got, want)
+								}
+								queries, err := strconv.ParseFloat(arr[1], 64)
+								if err != nil {
+									return err
+								}
+								failedQueries, err := strconv.ParseFloat(arr[2], 64)
+								if err != nil {
+									return err
+								}
+								serversMetrics["queries"].WithLabelValues(arr[0]).Set(queries)
+								serversMetrics["queries_failed"].WithLabelValues(arr[0]).Set(failedQueries)
+							}
+						default:
+							g, ok := floatMetrics[txt.Hdr.Name]
+							if !ok {
+								continue // ignore unexpected answer from dnsmasq
+							}
+							if got, want := len(txt.Txt), 1; got != want {
+								return fmt.Errorf("stats DNS record %q: unexpected number of replies: got %d, want %d", txt.Hdr.Name, got, want)
+							}
+							f, err := strconv.ParseFloat(txt.Txt[0], 64)
+							if err != nil {
+								return err
+							}
+							g.Set(f)
+						}
 					}
-					serversMetrics["queries"].WithLabelValues(arr[0]).Set(queries)
-					serversMetrics["queries_failed"].WithLabelValues(arr[0]).Set(failedQueries)
-				}
-			default:
-				g, ok := floatMetrics[txt.Hdr.Name]
-				if !ok {
-					continue // ignore unexpected answer from dnsmasq
-				}
-				if got, want := len(txt.Txt), 1; got != want {
-					return fmt.Errorf("stats DNS record %q: unexpected number of replies: got %d, want %d", txt.Hdr.Name, got, want)
-				}
-				f, err := strconv.ParseFloat(txt.Txt[0], 64)
-				if err != nil {
-					return err
-				}
-				g.Set(f)
-			}
-		}
-		return nil
-	})
+					return nil
+				})
+
+		}(msg)
+	}
 
 	eg.Go(func() error {
 		f, err := os.Open(s.leasesPath)
